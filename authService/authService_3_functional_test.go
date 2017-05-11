@@ -10,15 +10,6 @@ import (
 var clientIDs = []string{}
 var accessTokens = []string{}
 
-func GetTestAddresses() []string {
-	return []string{
-		"123.123.123.123",
-		"69.69.69.69",
-		"1.2.3.4",
-		"87.65.43.21",
-	}
-}
-
 //GetClientID Tests
 func TestPassGetClientID(t *testing.T) {
 	//Number of times to repeat the test (suggested min 2).
@@ -37,13 +28,13 @@ func TestPassGetClientID(t *testing.T) {
 		req.RemoteAddr = addr
 
 		//Generate an initial key
-		retVal := webservice.RunWebServiceTest(req, nil, addr, GetClientID)
+		retVal := webservice.RunWebServiceTest(req, nil, addr, getClientID)
 		if retVal == "" {
 			t.Errorf("GetClientID failed: Result is blank for address %s", addr)
 		} else {
 			//Rerun generation and make sure the result is the same
 			for i := 0; i < testRepeats; i++ {
-				retVal2 := webservice.RunWebServiceTest(req, nil, addr, GetClientID)
+				retVal2 := webservice.RunWebServiceTest(req, nil, addr, getClientID)
 				if retVal2 != retVal {
 					t.Errorf("GetClientID failed: Did not return the same values twice for address: %s", addrs[i])
 				}
@@ -72,7 +63,7 @@ func TestPassGetAccessToken(t *testing.T) {
 			Address:       addrs[i],
 		}
 
-		retVal := webservice.RunWebServiceTest(req, atr, addrs[i], GetAccessToken)
+		retVal := webservice.RunWebServiceTest(req, atr, addrs[i], getAccessToken)
 		if retVal == "" {
 			t.Errorf("GetAccessToken failed: Result is blank for address %s", atr.Address)
 		} else {
@@ -99,7 +90,7 @@ func TestFailGetAccessToken(t *testing.T) {
 			Address:       addrs[i],
 		}
 
-		retVal := webservice.RunWebServiceTest(req, atr, addrs[i], GetAccessToken)
+		retVal := webservice.RunWebServiceTest(req, atr, addrs[i], getAccessToken)
 		if retVal != "" {
 			t.Errorf("GetAccessToken failed: Returned access token with invalid ClientID %s", atr.Address)
 		}
@@ -122,7 +113,7 @@ func TestPassAuthorisation(t *testing.T) {
 		err := json.Unmarshal([]byte(accessTokens[i]), at)
 
 		if err == nil {
-			retVal := (webservice.RunWebServiceTest(req, at, at.Address, Authorise) == "true")
+			retVal := (webservice.RunWebServiceTest(req, at, at.Address, authorise) == "true")
 
 			if !retVal {
 				t.Errorf("Authorise failed: AccessToken authorisation failed for address %s", at.Address)
@@ -148,7 +139,7 @@ func TestFailAuthorisation(t *testing.T) {
 		at.Access_Token = "THISISAFAKEANDBROKENACCESSTOKEN"
 
 		if err == nil {
-			retVal := (webservice.RunWebServiceTest(req, at, at.Address, Authorise) == "true")
+			retVal := (webservice.RunWebServiceTest(req, at, at.Address, authorise) == "true")
 
 			if retVal {
 				t.Errorf("Authorise failed: AccessToken authorisation succeeded for a broken access token for address %s", at.Address)

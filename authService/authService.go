@@ -14,8 +14,6 @@ const dbName string = "authDB"
 const accessTokenCol string = "accessTokens"
 const clientCol string = "clients"
 
-//Structs
-
 type AccessTokenRequest struct {
 	Response_Type string
 	Client_Id     string
@@ -64,75 +62,10 @@ type Client struct {
 	Address   string        `bson:"address"`
 }
 
-//Functions
-
-// Generates and returns an AccessToken string
-// Will return nil if there is any kind of error
-func (atr *AccessTokenRequest) GetAccessToken() *AccessToken {
-	accessToken := &AccessToken{}
-
-	session, err := mgo.Dial(dbUrl)
-	if err == nil {
-		colClients := session.DB(dbName).C(clientCol)
-		numResults, err := colClients.Find(bson.M{"client_id": atr.Client_Id, "address": atr.Address}).Count()
-
-		if numResults > 0 && err == nil {
-			c := session.DB(dbName).C(accessTokenCol)
-			numResults, err := c.Find(bson.M{"client_id": atr.Client_Id, "address": atr.Address}).Count()
-
-			if numResults > 0 {
-				err = c.Find(bson.M{"client_id": atr.Client_Id, "address": atr.Address}).One(accessToken)
-			} else {
-				accessToken = atr.GenerateAccessToken()
-				if accessToken != nil {
-					err = c.Insert(accessToken)
-				}
-			}
-			if err == nil {
-				return accessToken
-			}
-		}
-	}
-
-	return &AccessToken{}
-}
-
-// GenerateAccessToken creates an AccessToken object from an AccessToken request
-// Does not handle Client validation
-func (atr *AccessTokenRequest) GenerateAccessToken() *AccessToken {
-	accessToken := &AccessToken{}
-	var err error
-
-	accessToken.Client_Id = atr.Client_Id
-	accessToken.Access_Token, err = random.GenerateRandomString(50)
-
-	if err == nil {
-		accessToken.Refresh_Token, err = random.GenerateRandomString(50)
-		accessToken.Expires = 600
-		accessToken.Token_Type = "token"
-		accessToken.Address = atr.Address
-		return accessToken
-	}
-
-	return nil
-}
-
-// Validates the access key
-func (accessToken *AccessToken) Validate() bool {
-	session, err := mgo.Dial(dbUrl)
-	if err == nil {
-		col := session.DB(dbName).C(accessTokenCol)
-		numResults, err := col.Find(bson.M{"access_token": accessToken.Access_Token, "client_id": accessToken.Client_Id, "address": accessToken.Address}).Count()
-
-		return (numResults > 0 && err == nil)
-	}
-	return false
-}
-
 // GenerateClientID creates a client ID for  new service
 // Generate a client ID if one doesn't exist, or return the cleint ID if one does.
 // Returns blank string if there is a failure
-func GetClientID(w http.ResponseWriter, r *http.Request) {
+func getClientID(w http.ResponseWriter, r *http.Request) {
 	client := &Client{}
 	result := &Client{}
 
@@ -161,23 +94,100 @@ func GetClientID(w http.ResponseWriter, r *http.Request) {
 
 // GenerateAccessToken creates a key for a validated client
 // Generate and return either an AccessToken or an error
-func GetAccessToken(w http.ResponseWriter, r *http.Request) {
+func getAccessToken(w http.ResponseWriter, r *http.Request) {
 	atr := &AccessTokenRequest{}
 
 	err := json.NewDecoder(r.Body).Decode(&atr)
 	if err == nil {
-		accessToken := atr.GetAccessToken()
-		if accessToken.Validate() {
-			err = json.NewEncoder(w).Encode(accessToken)
+		accessToken := atr.getAccessToken()
+		if accessToken != nil {
+			if accessToken.validate() {
+				err = json.NewEncoder(w).Encode(accessToken)
+			}
 		}
 	} else {
 		fmt.Println(err.Error())
 	}
 }
 
+// Generates and returns an AccessToken string
+// Will return nil if there is any kind of error
+func (atr *AccessTokenRequest) getAccessToken() *AccessToken {
+	session, err := mgo.Dial(dbUrl)
+	if err == nil {
+		db := session.DB(dbName)
+		cClient := db.C(clientCol)
+		//Check Database for existing access token
+		if checkClientExists(cClient, atr.Address, atr.Client_Id) {
+			cAccessToken := db.C(accessTokenCol)
+			exists, accessToken := getExistingAccessToken(cAccessToken, atr.Address, atr.Client_Id)
+			if !exists {
+				accessToken = atr.createAccessToken(cAccessToken)
+			}
+			return accessToken
+		}
+	}
+
+	return nil
+}
+
+// CreateAccessToken creates an AccessToken object from an AccessToken request
+// Does not handle Client validation
+func (atr *AccessTokenRequest) createAccessToken(c *mgo.Collection) *AccessToken {
+	accessToken := &AccessToken{}
+	var err error
+
+	accessToken.Client_Id = atr.Client_Id
+	accessToken.Access_Token, err = random.GenerateRandomString(50)
+
+	if err == nil {
+		accessToken.Refresh_Token, err = random.GenerateRandomString(50)
+		accessToken.Expires = 600
+		accessToken.Token_Type = "token"
+		accessToken.Address = atr.Address
+
+		//Write to database
+		err = c.Insert(accessToken)
+		if err == nil {
+			return accessToken
+		}
+	}
+	return nil
+}
+
+//CheckClientExists checks if the client exists by address and client id
+//Returns true if it does, false if it doesn't
+func checkClientExists(c *mgo.Collection, address string, client_id string) bool {
+	numResults, err := c.Find(bson.M{"client_id": client_id, "address": address}).Count()
+	return (numResults > 0 && err == nil)
+}
+
+//GetExistingAccessToken grabs any existing access tokens based on address and client id
+//Returns true and the access token if it exists, false if it doesn't
+func getExistingAccessToken(c *mgo.Collection, address string, client_id string) (bool, *AccessToken) {
+	at := &AccessToken{}
+	numResults, err := c.Find(bson.M{"client_id": client_id, "address": address}).Count()
+	if numResults > 0 && err == nil {
+		err = c.Find(bson.M{"client_id": client_id, "address": address}).One(at)
+		return (err == nil), at
+	} else {
+		return false, nil
+	}
+}
+
+// Validates the access token object and handles all validation
+func (accessToken *AccessToken) validate() bool {
+	session, err := mgo.Dial(dbUrl)
+	if err == nil {
+		c := session.DB(dbName).C(accessTokenCol)
+		return validateAccessToken(c, *accessToken)
+	}
+	return false
+}
+
 // Authorise returns true if the key matches the client id, address and access_code
 // Returns false if any validation fails
-func Authorise(w http.ResponseWriter, r *http.Request) {
+func authorise(w http.ResponseWriter, r *http.Request) {
 	var accessToken AccessToken
 	if r.Body == nil {
 		http.Error(w, "Please send a request body", 400)
@@ -190,13 +200,19 @@ func Authorise(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Fprintln(w, accessToken.Validate())
+	fmt.Fprintln(w, accessToken.validate())
+}
+
+//ValidateAccessToken checks the database for the AccessToken object
+func validateAccessToken(c *mgo.Collection, accessToken AccessToken) bool {
+	numResults, err := c.Find(bson.M{"access_token": accessToken.Access_Token, "client_id": accessToken.Client_Id, "address": accessToken.Address}).Count()
+	return (numResults > 0 && err == nil)
 }
 
 // Create WebServer
 func main() {
-	http.HandleFunc("/getclientid", GetClientID)
-	http.HandleFunc("/getaccesstoken", GetAccessToken)
-	http.HandleFunc("/authorise", Authorise)
+	http.HandleFunc("/getclientid", getClientID)
+	http.HandleFunc("/getaccesstoken", getAccessToken)
+	http.HandleFunc("/authorise", authorise)
 	http.ListenAndServe(":8080", nil)
 }
