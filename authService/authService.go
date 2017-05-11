@@ -68,7 +68,7 @@ type Client struct {
 
 // Generates and returns an AccessToken string
 // Will return nil if there is any kind of error
-func (atr *AccessTokenRequest) GenerateAccessToken() *AccessToken {
+func (atr *AccessTokenRequest) GetAccessToken() *AccessToken {
 	accessToken := &AccessToken{}
 
 	session, err := mgo.Dial(dbUrl)
@@ -83,7 +83,7 @@ func (atr *AccessTokenRequest) GenerateAccessToken() *AccessToken {
 			if numResults > 0 {
 				err = c.Find(bson.M{"client_id": atr.Client_Id, "address": atr.Address}).One(accessToken)
 			} else {
-				accessToken = atr.GenerateAccessTokenObject()
+				accessToken = atr.GenerateAccessToken()
 				if accessToken != nil {
 					err = c.Insert(accessToken)
 				}
@@ -99,7 +99,7 @@ func (atr *AccessTokenRequest) GenerateAccessToken() *AccessToken {
 
 // GenerateAccessToken creates an AccessToken object from an AccessToken request
 // Does not handle Client validation
-func (atr *AccessTokenRequest) GenerateAccessTokenObject() *AccessToken {
+func (atr *AccessTokenRequest) GenerateAccessToken() *AccessToken {
 	accessToken := &AccessToken{}
 	var err error
 
@@ -122,9 +122,9 @@ func (accessToken *AccessToken) Validate() bool {
 	session, err := mgo.Dial(dbUrl)
 	if err == nil {
 		col := session.DB(dbName).C(accessTokenCol)
-		numResults, dbErr := col.Find(bson.M{"access_token": accessToken.Access_Token, "client_id": accessToken.Client_Id, "address": accessToken.Address}).Count()
+		numResults, err := col.Find(bson.M{"access_token": accessToken.Access_Token, "client_id": accessToken.Client_Id, "address": accessToken.Address}).Count()
 
-		return (numResults > 0 && dbErr == nil)
+		return (numResults > 0 && err == nil)
 	}
 	return false
 }
@@ -166,7 +166,7 @@ func GetAccessToken(w http.ResponseWriter, r *http.Request) {
 
 	err := json.NewDecoder(r.Body).Decode(&atr)
 	if err == nil {
-		accessToken := atr.GenerateAccessToken()
+		accessToken := atr.GetAccessToken()
 		if accessToken.Validate() {
 			err = json.NewEncoder(w).Encode(accessToken)
 		}

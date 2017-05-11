@@ -1,19 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"io/ioutil"
+	"github.com/imryano/utils/webservice"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
 var clientIDs = []string{}
 var accessTokens = []string{}
 
-func GetAddresses() []string {
+func GetTestAddresses() []string {
 	return []string{
 		"123.123.123.123",
 		"69.69.69.69",
@@ -22,10 +19,11 @@ func GetAddresses() []string {
 	}
 }
 
-func TestGetClientID(t *testing.T) {
+//GetClientID Tests
+func TestPassGetClientID(t *testing.T) {
 	//Number of times to repeat the test (suggested min 2).
 	testRepeats := 2
-	addrs := GetAddresses()
+	addrs := GetTestAddresses()
 
 	//Create the request object. This will be modified for each test.
 	req, err := http.NewRequest("GET", "/getclientid", nil)
@@ -39,31 +37,25 @@ func TestGetClientID(t *testing.T) {
 		req.RemoteAddr = addr
 
 		//Generate an initial key
-		retVal := RunGetClientIDTest(req)
+		retVal := webservice.RunWebServiceTest(req, nil, addr, GetClientID)
 		if retVal == "" {
 			t.Errorf("GetClientID failed: Result is blank for address %s", addr)
 		} else {
 			//Rerun generation and make sure the result is the same
 			for i := 0; i < testRepeats; i++ {
-				retVal2 := RunGetClientIDTest(req)
+				retVal2 := webservice.RunWebServiceTest(req, nil, addr, GetClientID)
 				if retVal2 != retVal {
 					t.Errorf("GetClientID failed: Did not return the same values twice for address: %s", addrs[i])
 				}
 			}
 		}
-		clientIDs = append(clientIDs, strings.TrimSpace(retVal))
+		clientIDs = append(clientIDs, retVal)
 	}
 }
 
-func RunGetClientIDTest(req *http.Request) string {
-	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(GetClientID)
-	handler.ServeHTTP(rr, req)
-	return rr.Body.String()
-}
-
-func TestGetAccessToken(t *testing.T) {
-	addrs := GetAddresses()
+//GetAccessToken Tests
+func TestPassGetAccessToken(t *testing.T) {
+	addrs := GetTestAddresses()
 
 	//Create the request object. This will be modified for each test.
 	req, err := http.NewRequest("GET", "/getaccesstoken", nil)
@@ -80,13 +72,22 @@ func TestGetAccessToken(t *testing.T) {
 			Address:       addrs[i],
 		}
 
-		retVal := RunGetAccessTokenTest(req, atr)
-		retVal = strings.TrimSpace(retVal)
+		retVal := webservice.RunWebServiceTest(req, atr, addrs[i], GetAccessToken)
 		if retVal == "" {
 			t.Errorf("GetAccessToken failed: Result is blank for address %s", atr.Address)
 		} else {
 			accessTokens = append(accessTokens, retVal)
 		}
+	}
+}
+
+func TestFailGetAccessToken(t *testing.T) {
+	addrs := GetTestAddresses()
+
+	//Create the request object. This will be modified for each test.
+	req, err := http.NewRequest("GET", "/getaccesstoken", nil)
+	if err != nil {
+		t.Errorf("GetAccessToken failed: Could not create request: %s", err)
 	}
 
 	//Test failure conditions
@@ -98,32 +99,16 @@ func TestGetAccessToken(t *testing.T) {
 			Address:       addrs[i],
 		}
 
-		retVal := RunGetAccessTokenTest(req, atr)
-		retVal = strings.TrimSpace(retVal)
+		retVal := webservice.RunWebServiceTest(req, atr, addrs[i], GetAccessToken)
 		if retVal != "" {
 			t.Errorf("GetAccessToken failed: Returned access token with invalid ClientID %s", atr.Address)
 		}
 	}
 }
 
-func RunGetAccessTokenTest(req *http.Request, atr *AccessTokenRequest) string {
-	req.RemoteAddr = atr.Address
-	b := new(bytes.Buffer)
-	err := json.NewEncoder(b).Encode(atr)
-
-	if err == nil {
-		req.Body = ioutil.NopCloser(b)
-
-		rr := httptest.NewRecorder()
-		handler := http.HandlerFunc(GetAccessToken)
-		handler.ServeHTTP(rr, req)
-		return rr.Body.String()
-	}
-	return ""
-}
-
-func TestAuthorise(t *testing.T) {
-	addrs := GetAddresses()
+//Authorisation Tests
+func TestPassAuthorisation(t *testing.T) {
+	addrs := GetTestAddresses()
 	at := &AccessToken{}
 
 	//Create the request object. This will be modified for each test.
@@ -137,12 +122,23 @@ func TestAuthorise(t *testing.T) {
 		err := json.Unmarshal([]byte(accessTokens[i]), at)
 
 		if err == nil {
-			retVal := RunAuthoriseTest(req, at)
+			retVal := (webservice.RunWebServiceTest(req, at, at.Address, Authorise) == "true")
 
 			if !retVal {
 				t.Errorf("Authorise failed: AccessToken authorisation failed for address %s", at.Address)
 			}
 		}
+	}
+}
+
+func TestFailAuthorisation(t *testing.T) {
+	addrs := GetTestAddresses()
+	at := &AccessToken{}
+
+	//Create the request object. This will be modified for each test.
+	req, err := http.NewRequest("GET", "/authorise", nil)
+	if err != nil {
+		t.Errorf("Authorise failed: Could not create request: %s", err)
 	}
 
 	//Test fail conditions
@@ -152,27 +148,11 @@ func TestAuthorise(t *testing.T) {
 		at.Access_Token = "THISISAFAKEANDBROKENACCESSTOKEN"
 
 		if err == nil {
-			retVal := RunAuthoriseTest(req, at)
+			retVal := (webservice.RunWebServiceTest(req, at, at.Address, Authorise) == "true")
 
 			if retVal {
 				t.Errorf("Authorise failed: AccessToken authorisation succeeded for a broken access token for address %s", at.Address)
 			}
 		}
 	}
-}
-
-func RunAuthoriseTest(req *http.Request, at *AccessToken) bool {
-	req.RemoteAddr = at.Address
-	b := new(bytes.Buffer)
-	err := json.NewEncoder(b).Encode(at)
-
-	if err == nil {
-		req.Body = ioutil.NopCloser(b)
-
-		rr := httptest.NewRecorder()
-		handler := http.HandlerFunc(Authorise)
-		handler.ServeHTTP(rr, req)
-		return (strings.TrimSpace(rr.Body.String()) == "true")
-	}
-	return false
 }
